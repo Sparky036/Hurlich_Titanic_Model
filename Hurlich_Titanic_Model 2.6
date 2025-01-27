@@ -1,0 +1,132 @@
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+# Load the training dataset
+data_set_file_path = r'ORIGINAL DATASET FILEPATH GOES HERE'
+titanic_data = pd.read_csv(data_set_file_path)
+
+# Data Preprocessing
+# Extract Title from Name
+titanic_data['Title'] = titanic_data['Name'].str.extract(r'([A-Za-z]+)\.', expand=False)
+title_mapping = {
+    'Mr': 1, 'Miss': 2, 'Mrs': 3, 'Master': 4, 'Dr': 5, 'Rev': 6,
+    'Col': 7, 'Major': 7, 'Mlle': 8, 'Countess': 8, 'Ms': 2,
+    'Lady': 8, 'Jonkheer': 8, 'Don': 9, 'Dona': 8, 'Mme': 3,
+    'Capt': 7, 'Sir': 9
+}
+titanic_data['Title'] = titanic_data['Title'].map(title_mapping).fillna(0)
+
+# Extract Surname from Name
+titanic_data['Surname'] = titanic_data['Name'].str.split(',').str[0]
+
+# Family Grouping by Surname and Ticket
+titanic_data['FamilyGroup'] = titanic_data.groupby(['Surname', 'Ticket'])['PassengerId'].transform('count')
+titanic_data['IsAlone'] = np.where(titanic_data['FamilyGroup'] > 1, 0, 1)
+
+# Fare per Person
+titanic_data['FarePerPerson'] = titanic_data['Fare'] / titanic_data['FamilyGroup']
+titanic_data['FarePerPerson'].fillna(titanic_data['Fare'], inplace=True)
+
+# Bin Age into Categories
+titanic_data['AgeBin'] = pd.cut(
+    titanic_data['Age'],
+    bins=[0, 12, 18, 35, 60, np.inf],
+    labels=[0, 1, 2, 3, 4]
+)
+
+# Handle missing values
+titanic_data['Age'] = titanic_data['Age'].fillna(titanic_data['Age'].median())
+titanic_data['Embarked'] = titanic_data['Embarked'].fillna(titanic_data['Embarked'].mode()[0])
+
+# Encode categorical variables
+sex_mapping = {'male': 0, 'female': 1}
+embarked_mapping = {val: idx for idx, val in enumerate(titanic_data['Embarked'].unique())}
+titanic_data['Sex'] = titanic_data['Sex'].map(sex_mapping)
+titanic_data['Embarked'] = titanic_data['Embarked'].map(embarked_mapping)
+
+# Interaction Features
+titanic_data['Age*Class'] = titanic_data['Age'] * titanic_data['Pclass']
+titanic_data['Fare*Class'] = titanic_data['Fare'] * titanic_data['Pclass']
+
+# Drop irrelevant or redundant columns
+titanic_data.drop(['Name', 'Cabin', 'PassengerId', 'Ticket', 'Surname'], axis=1, inplace=True)
+
+# Define predictors and target variable
+X = titanic_data.drop(['Survived'], axis=1)
+y = titanic_data['Survived']
+
+# Split the data into training and testing sets. Play with different random_states or leave it blank
+train_X, test_X, train_y, test_y = train_test_split(X, y, test_size=0.2, random_state=36)
+
+# Feature Scaling
+scaler = StandardScaler()
+train_X = scaler.fit_transform(train_X)
+test_X = scaler.transform(test_X)
+
+# Model Training with Hyperparameter Tuning (Play with different random states or leave blank)
+rf = RandomForestClassifier(random_state=36)
+
+param_grid = {
+    'n_estimators': [100, 200],
+    'max_depth': [10, 20],
+    'min_samples_split': [2, 5],
+    'min_samples_leaf': [1, 2],
+    'criterion': ['gini']
+}
+
+grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+grid_search.fit(train_X, train_y)
+
+best_rf = grid_search.best_estimator_
+
+# Predict on test set to ensure the model works
+test_predictions = best_rf.predict(test_X)
+accuracy = accuracy_score(test_y, test_predictions)
+
+print(f'Accuracy: {accuracy:.4f}')
+
+# Load the test dataset for predictions
+new_data_file_path = r'FILEPATH GOES HERE'
+new_data = pd.read_csv(new_data_file_path)
+
+# Apply the same preprocessing to the test dataset
+new_data['Title'] = new_data['Name'].str.extract(r'([A-Za-z]+)\.', expand=False).map(title_mapping).fillna(0)
+new_data['Surname'] = new_data['Name'].str.split(',').str[0]
+new_data['FamilyGroup'] = new_data.groupby(['Surname', 'Ticket'])['PassengerId'].transform('count')
+new_data['IsAlone'] = np.where(new_data['FamilyGroup'] > 1, 0, 1)
+new_data['FarePerPerson'] = new_data['Fare'] / new_data['FamilyGroup']
+new_data['FarePerPerson'].fillna(new_data['Fare'], inplace=True)
+new_data['AgeBin'] = pd.cut(
+    new_data['Age'],
+    bins=[0, 12, 18, 35, 60, np.inf],
+    labels=[0, 1, 2, 3, 4]
+)
+new_data['Age'] = new_data['Age'].fillna(titanic_data['Age'].median())
+new_data['Embarked'] = new_data['Embarked'].fillna(titanic_data['Embarked'].mode()[0])
+new_data['Sex'] = new_data['Sex'].map(sex_mapping)
+new_data['Embarked'] = new_data['Embarked'].map(embarked_mapping)
+new_data['Age*Class'] = new_data['Age'] * new_data['Pclass']
+new_data['Fare*Class'] = new_data['Fare'] * new_data['Pclass']
+
+# Drop irrelevant columns. Also format to Kaggle specified terms
+passenger_ids = new_data['PassengerId']
+new_data.drop(['Name', 'Cabin', 'PassengerId', 'Ticket', 'Surname'], axis=1, inplace=True)
+
+# Scale the new data
+scaled_new_data = scaler.transform(new_data)
+
+# Predict survival for the new dataset
+new_predictions = best_rf.predict(scaled_new_data)
+
+# Save predictions to a new CSV
+output_df = pd.DataFrame({'PassengerId': passenger_ids, 'Survived': new_predictions})
+output_file_path = r'OUTPUT FILE PATH/NAME GOES HERE'
+output_df.to_csv(output_file_path, index=False)
+
+# Output complete verification
+print(f"Predictions saved to {output_file_path}")
