@@ -1,0 +1,205 @@
+# Documentation for Titanic Survival Prediction Code  
+
+This document provides detailed explanations of each module in the Titanic Survival Prediction pipeline. The code performs dataset preprocessing, model training, and prediction, broken into clear and reusable functions for maintainability.
+
+---
+
+## **1. Data Loading Module**  
+
+### **Code**:
+```python
+# Load the training dataset
+data_set_file_path = r'ORIGINAL DATASET FILEPATH GOES HERE'
+titanic_data = pd.read_csv(data_set_file_path)
+```
+
+### **Purpose**:  
+Loads the training dataset from a specified file path into a Pandas DataFrame for further processing.
+
+### **Key Features**:  
+- Reads data using `pd.read_csv()`.
+- Stores the data in the `titanic_data` variable for preprocessing.
+
+---
+
+## **2. Data Preprocessing Module**  
+
+### **Purpose**:  
+Prepares the data for machine learning by cleaning, transforming, and engineering features.
+
+### **Key Steps**:  
+
+#### **2.1 Extract Title and Surname**  
+- **Extract Title from Name**:  
+  ```python
+  titanic_data['Title'] = titanic_data['Name'].str.extract(r'([A-Za-z]+)\.', expand=False)
+  title_mapping = { ... }  # Map titles to numerical values
+  titanic_data['Title'] = titanic_data['Title'].map(title_mapping).fillna(0)
+  ```
+  - Maps titles (e.g., "Mr", "Miss") to numerical values.
+  - Fills missing titles with `0`.
+
+- **Extract Surname from Name**:  
+  ```python
+  titanic_data['Surname'] = titanic_data['Name'].str.split(',').str[0]
+  ```
+
+#### **2.2 Create Family Features**  
+- **Family Grouping**:  
+  ```python
+  titanic_data['FamilyGroup'] = titanic_data.groupby(['Surname', 'Ticket'])['PassengerId'].transform('count')
+  titanic_data['IsAlone'] = np.where(titanic_data['FamilyGroup'] > 1, 0, 1)
+  ```
+  - Counts family members based on `Surname` and `Ticket`.
+  - Creates a binary `IsAlone` feature to indicate solo travelers.
+
+#### **2.3 Compute Fare Per Person**  
+```python
+titanic_data['FarePerPerson'] = titanic_data['Fare'] / titanic_data['FamilyGroup']
+titanic_data['FarePerPerson'].fillna(titanic_data['Fare'], inplace=True)
+```
+- Normalizes the fare by dividing it by the family size.
+- Fills missing values with the original fare.
+
+#### **2.4 Bin Age into Categories**  
+```python
+titanic_data['AgeBin'] = pd.cut(
+    titanic_data['Age'],
+    bins=[0, 12, 18, 35, 60, np.inf],
+    labels=[0, 1, 2, 3, 4]
+)
+```
+- Groups age into predefined ranges and assigns labels for each range.
+
+#### **2.5 Handle Missing Values**  
+```python
+titanic_data['Age'] = titanic_data['Age'].fillna(titanic_data['Age'].median())
+titanic_data['Embarked'] = titanic_data['Embarked'].fillna(titanic_data['Embarked'].mode()[0])
+```
+- Fills missing `Age` with the median.
+- Fills missing `Embarked` with the mode.
+
+#### **2.6 Encode Categorical Variables**  
+```python
+sex_mapping = {'male': 0, 'female': 1}
+embarked_mapping = {val: idx for idx, val in enumerate(titanic_data['Embarked'].unique())}
+titanic_data['Sex'] = titanic_data['Sex'].map(sex_mapping)
+titanic_data['Embarked'] = titanic_data['Embarked'].map(embarked_mapping)
+```
+- Converts categorical variables (`Sex` and `Embarked`) into numerical values.
+
+#### **2.7 Feature Interaction**  
+```python
+titanic_data['Age*Class'] = titanic_data['Age'] * titanic_data['Pclass']
+titanic_data['Fare*Class'] = titanic_data['Fare'] * titanic_data['Pclass']
+```
+- Creates interaction features combining `Age`, `Fare`, and `Pclass`.
+
+#### **2.8 Drop Irrelevant Columns**  
+```python
+titanic_data.drop(['Name', 'Cabin', 'PassengerId', 'Ticket', 'Surname'], axis=1, inplace=True)
+```
+- Removes columns irrelevant for model training.
+
+---
+
+## **3. Model Training Module**  
+
+### **Code**:
+```python
+# Define predictors and target variable
+X = titanic_data.drop(['Survived'], axis=1)
+y = titanic_data['Survived']
+
+# Split data
+train_X, test_X, train_y, test_y = train_test_split(X, y, test_size=0.2, random_state=36)
+
+# Feature Scaling
+scaler = StandardScaler()
+train_X = scaler.fit_transform(train_X)
+test_X = scaler.transform(test_X)
+```
+
+### **Purpose**:  
+Prepares the training data, scales features, and splits the dataset for training and testing.
+
+### **Key Features**:
+1. **Feature Scaling**: Standardizes numerical features using `StandardScaler`.
+2. **Train-Test Split**: Splits the data into 80% training and 20% testing subsets.
+
+---
+
+## **4. Hyperparameter Tuning and Model Training**  
+
+### **Code**:
+```python
+rf = RandomForestClassifier(random_state=36)
+param_grid = { ... }  # Grid of hyperparameters
+grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+grid_search.fit(train_X, train_y)
+best_rf = grid_search.best_estimator_
+```
+
+### **Purpose**:  
+Optimizes the hyperparameters of a **Random Forest Classifier** using Grid Search with cross-validation.
+
+### **Key Features**:
+- **GridSearchCV**: Tests combinations of hyperparameters (`n_estimators`, `max_depth`, etc.).
+- **Best Estimator**: Selects the best-performing model based on accuracy.
+
+---
+
+## **5. Model Evaluation Module**  
+
+### **Code**:
+```python
+test_predictions = best_rf.predict(test_X)
+accuracy = accuracy_score(test_y, test_predictions)
+print(f'Accuracy: {accuracy:.4f}')
+```
+
+### **Purpose**:  
+Evaluates the trained model on the test set.
+
+### **Key Features**:
+- Computes the **accuracy score** of the predictions.
+
+---
+
+## **6. Prediction on New Data**  
+
+### **Code**:
+```python
+new_data_file_path = r'FILEPATH GOES HERE'
+new_data = pd.read_csv(new_data_file_path)
+```
+
+### **Purpose**:  
+Loads and preprocesses new data for survival prediction.
+
+### **Key Features**:
+- Applies the same preprocessing steps as the training data.
+- Predicts survival using the trained model:
+  ```python
+  scaled_new_data = scaler.transform(new_data)
+  new_predictions = best_rf.predict(scaled_new_data)
+  ```
+
+### **Save Predictions**:
+```python
+output_df = pd.DataFrame({'PassengerId': passenger_ids, 'Survived': new_predictions})
+output_df.to_csv(output_file_path, index=False)
+```
+- Saves predictions to a CSV file for submission or review.
+
+---
+
+## **7. Output Verification Module**  
+
+### **Code**:
+```python
+print(f"Predictions saved to {output_file_path}")
+```
+
+### **Purpose**:  
+Displays a message confirming that predictions were successfully saved.
